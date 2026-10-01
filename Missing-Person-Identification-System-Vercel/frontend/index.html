@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Missing Person Identification System</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="toast"></div>
+
+<section id="loginView" class="screen">
+  <div class="login-card">
+    <div class="eyebrow">AI-ASSISTED OPERATIONS</div>
+    <h1>Missing Person<br>Identification System</h1>
+    <p>Officer & Admin Portal</p>
+    <form id="loginForm">
+      <label>Username<input name="username" required autocomplete="username"></label>
+      <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
+      <button>Sign in</button>
+    </form>
+    <div id="loginError" class="error"></div>
+    <p class="small">Public sightings can be submitted without an officer account.</p>
+    <button class="secondary" onclick="showPublic()">Report a public sighting</button>
+  </div>
+</section>
+
+<section id="publicView" class="screen hidden">
+  <div class="public-card">
+    <button class="link" onclick="showLogin()">← Officer login</button>
+    <div class="eyebrow">PUBLIC PORTAL</div>
+    <h1>Report a sighting</h1>
+    <p>Share a clear photo to help connect a sighting with an open case.</p>
+    <form id="sightingForm">
+      <div class="grid2">
+        <label>Your name *<input name="name" required></label>
+        <label>Mobile *<input name="mobile" inputmode="numeric" maxlength="10" required></label>
+        <label>Email<input name="email" type="email"></label>
+        <label>Location seen *<input name="location" required></label>
+      </div>
+      <label>Birth marks / identifying features<textarea name="birth_marks"></textarea></label>
+      <label>Photo *<input name="image" type="file" accept="image/jpeg,image/png" required></label>
+      <button>Submit sighting</button>
+    </form>
+    <div id="publicMessage"></div>
+  </div>
+</section>
+
+<section id="appView" class="hidden">
+<header>
+  <div>
+    <div class="eyebrow">AI-ASSISTED OPERATIONS DASHBOARD</div>
+    <h2 id="welcome"></h2>
+    <span id="roleBadge" class="badge"></span>
+  </div>
+  <button class="secondary" onclick="logout()">Logout</button>
+</header>
+<nav>
+  <button onclick="showPanel('dashboard')">Dashboard</button>
+  <button onclick="showPanel('register')">Register Case</button>
+  <button onclick="showPanel('cases')">All Cases</button>
+  <button id="matchNav" onclick="showPanel('match')">Match Cases</button>
+</nav>
+
+<main>
+  <section id="dashboardPanel" class="panel">
+    <div class="cards">
+      <div class="metric"><span>Found Cases</span><strong id="foundCount">0</strong></div>
+      <div class="metric"><span>Not Found Cases</span><strong id="nfCount">0</strong></div>
+      <div class="metric"><span>Total Cases</span><strong id="totalCount">0</strong></div>
+    </div>
+    <h3>Cases by City</h3>
+    <div id="cityTable" class="tableWrap"></div>
+    <div class="note">Map view can be added once a production map provider/API key is selected.</div>
+  </section>
+
+  <section id="registerPanel" class="panel hidden">
+    <h2>Register New Case</h2>
+    <p class="muted">Upload a clear, front-facing image. The server extracts the face landmarks before saving the case.</p>
+    <form id="caseForm">
+      <div class="grid2">
+        <label>Name *<input name="name" required></label>
+        <label>Father's Name<input name="father_name"></label>
+        <label>Age<input name="age" type="number" min="1" max="120"></label>
+        <label>Mobile<input name="mobile" maxlength="10" inputmode="numeric"></label>
+        <label>Aadhaar<input name="aadhaar" maxlength="12" inputmode="numeric"></label>
+        <label>City<input name="city"></label>
+        <label>Address<input name="address"></label>
+        <label>Last Seen *<input name="last_seen" required></label>
+        <label>Birth Marks<input name="birth_marks"></label>
+        <label>Complainant Name *<input name="complainant_name" required></label>
+        <label>Complainant Phone *<input name="complainant_phone" maxlength="10" required></label>
+        <label>Complainant Email<input name="complainant_email" type="email"></label>
+      </div>
+      <label>Description<textarea name="description"></textarea></label>
+      <label>Photo *<input name="image" type="file" accept="image/jpeg,image/png" required></label>
+      <button>Save Case</button>
+    </form>
+    <div id="caseMessage"></div>
+  </section>
+
+  <section id="casesPanel" class="panel hidden">
+    <div class="row"><h2>All Cases</h2><button class="secondary" onclick="loadCases()">Refresh</button></div>
+    <div id="casesTable" class="tableWrap"></div>
+  </section>
+
+  <section id="matchPanel" class="panel hidden">
+    <h2>Match Cases</h2>
+    <p class="muted">Admin only. This compares open registered cases with open public sightings using the same KNN distance logic as the original project.</p>
+    <label>Distance threshold<input id="threshold" type="number" step="0.1" value="3.0"></label>
+    <button onclick="runMatch()">Refresh & Match</button>
+    <div id="matchMessage"></div>
+  </section>
+</main>
+</section>
+
+<script>
+let me=null;
+const $=id=>document.getElementById(id);
+function toast(msg, bad=false){ $('toast').textContent=msg; $('toast').className=bad?'show bad':'show'; setTimeout(()=>$('toast').className='',3000); }
+function hideAll(){ $('loginView').classList.add('hidden'); $('publicView').classList.add('hidden'); $('appView').classList.add('hidden'); }
+function showLogin(){hideAll();$('loginView').classList.remove('hidden')}
+function showPublic(){hideAll();$('publicView').classList.remove('hidden')}
+function showApp(){hideAll();$('appView').classList.remove('hidden')}
+async function api(url,opts={}){ const r=await fetch(url,{credentials:'include',...opts}); let d={}; try{d=await r.json()}catch{} if(!r.ok) throw new Error(d.detail||'Request failed'); return d; }
+
+$('loginForm').onsubmit=async e=>{
+ e.preventDefault(); $('loginError').textContent='';
+ const data=Object.fromEntries(new FormData(e.target));
+ try{ me=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}); 
+   me=await api('/api/me'); showApp(); renderMe(); showPanel('dashboard'); 
+ }catch(err){$('loginError').textContent=err.message}
+};
+
+$('sightingForm').onsubmit=async e=>{
+ e.preventDefault(); const fd=new FormData(e.target);
+ try{const d=await api('/api/sightings',{method:'POST',body:fd}); $('publicMessage').innerHTML='<div class="success">Sighting submitted successfully.</div>'; e.target.reset();}
+ catch(err){$('publicMessage').innerHTML='<div class="error">'+err.message+'</div>'}
+};
+
+$('caseForm').onsubmit=async e=>{
+ e.preventDefault(); const fd=new FormData(e.target);
+ try{const d=await api('/api/cases',{method:'POST',body:fd}); $('caseMessage').innerHTML='<div class="success">Case registered. '+d.faces_detected+' face(s) detected.</div>'; e.target.reset(); loadDashboard();}
+ catch(err){$('caseMessage').innerHTML='<div class="error">'+err.message+'</div>'}
+};
+
+async function renderMe(){
+ $('welcome').textContent=me.name;
+ $('roleBadge').textContent=me.role+' • '+(me.area||me.city||'');
+ const admin=me.role.toLowerCase()==='admin';
+ $('matchNav').style.display=admin?'inline-block':'none';
+}
+function showPanel(name){
+ document.querySelectorAll('.panel').forEach(x=>x.classList.add('hidden'));
+ $(name+'Panel').classList.remove('hidden');
+ if(name==='dashboard') loadDashboard();
+ if(name==='cases') loadCases();
+}
+async function loadDashboard(){
+ try{const d=await api('/api/dashboard'); $('foundCount').textContent=d.found; $('nfCount').textContent=d.not_found; $('totalCount').textContent=d.total;
+ let rows=Object.entries(d.cities).sort((a,b)=>(b[1].found+b[1].not_found)-(a[1].found+a[1].not_found));
+ $('cityTable').innerHTML='<table><thead><tr><th>City</th><th>Total</th><th>Found</th><th>Not Found</th></tr></thead><tbody>'+rows.map(([c,v])=>`<tr><td>${esc(c)}</td><td>${v.found+v.not_found}</td><td>${v.found}</td><td>${v.not_found}</td></tr>`).join('')+'</tbody></table>'}
+ catch(err){toast(err.message,true)}
+}
+async function loadCases(){
+ try{const rows=await api('/api/cases'); $('casesTable').innerHTML='<table><thead><tr><th>Name</th><th>Age</th><th>Status</th><th>City</th><th>Last Seen</th><th>Submitted By</th></tr></thead><tbody>'+rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.age||'')}</td><td><span class="status ${r.status==='F'?'found':'nf'}">${r.status==='F'?'Found':'Not Found'}</span></td><td>${esc(r.city||'')}</td><td>${esc(r.last_seen)}</td><td>${esc(r.submitted_by)}</td></tr>`).join('')+'</tbody></table>'}
+ catch(err){toast(err.message,true)}
+}
+async function runMatch(){
+ $('matchMessage').textContent='Matching...';
+ try{const d=await api('/api/match',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:parseFloat($('threshold').value)||3})}); $('matchMessage').innerHTML='<div class="success">'+d.matches.length+' match(es) processed.</div>'; loadDashboard(); loadCases();}
+ catch(err){$('matchMessage').innerHTML='<div class="error">'+err.message+'</div>'}
+}
+async function logout(){await api('/api/logout',{method:'POST'});me=null;showLogin()}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+(async()=>{try{me=await api('/api/me');showApp();renderMe();showPanel('dashboard')}catch{showLogin()}})();
+</script>
+</body>
+</html>
